@@ -94,7 +94,8 @@ that you could write in order to get equivalent behaviour.  We assume that
     (try (let [result (call-some-service)]
            (when (> result 5) ;; abort condition
              (println "-- on failed attempt 1")
-             (abort! (format "Result [%d] > 5!" result)))
+             (println "-- on before abort")
+             (abort! (ex-info "Result > 5!" {:result result})))
            (when (= result ::bad) ;; retry condition
              (println "-- on failed attempt 2")
              (retry!))
@@ -104,7 +105,7 @@ that you could write in order to get equivalent behaviour.  We assume that
            (println "-- on failed attempt any")
            (throw e))))
   (d/chain #(println "-- on complete" %))
-  (d/catch manifail.Aborted #(println "-- on abort" %))
+  (d/catch manifail.Aborted #(println "-- on after abort" %))
   (d/catch manifail.RetriesExceeded #(println "-- on retries exceeded" %))
   (d/catch #(println "-- on failure" %)))
 ```

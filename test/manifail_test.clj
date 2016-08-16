@@ -68,15 +68,22 @@
       (is (between 10 30 b))
       (is (between 5 45 c)))))
 
-(defn- aborted? [r]
-  (try @r
-       false
-       (catch manifail.Aborted e true)))
+(defn- aborted?
+  ([r] (aborted? (constantly true) r))
+  ([ex-pred r]
+   (try @r
+        false
+        (catch manifail.Aborted e (ex-pred e)))))
 
-(defn- retries-exceeded? [r]
-  (try @r
-       false
-       (catch manifail.RetriesExceeded e true)))
+(defn- retries-exceeded?
+  ([r] (retries-exceeded? (constantly true) r))
+  ([ex-pred r]
+   (try @r
+        false
+        (catch manifail.RetriesExceeded e (ex-pred e)))))
+
+(defn- get-cause-message [e]
+  (-> e (.getCause) (.getMessage)))
 
 (deftest with-retries
   (let [executed (atom 0)]
@@ -110,12 +117,22 @@
 
     (reset! executed 0)
 
-    (testing "executes several times, retries using generic exception"
+    (testing "retries exceeded carries cause"
       (is
-        (retries-exceeded?
+        (retries-exceeded? #(= (get-cause-message %) "boom3")
           (sut/with-retries* (sut/retries 2)
             #(do (swap! executed inc)
-                 (throw (Exception. "BOOM!"))))))
+                 (sut/retry! (Exception. (str "boom" @executed)))))))
+      (is (= 3 @executed)))
+
+    (reset! executed 0)
+
+    (testing "executes several times, retries using generic exception"
+      (is
+        (retries-exceeded? #(= (get-cause-message %) "boom")
+          (sut/with-retries* (sut/retries 2)
+            #(do (swap! executed inc)
+                 (throw (Exception. "boom"))))))
       (is (= 3 @executed)))
 
     (reset! executed 0)
@@ -141,6 +158,15 @@
                    (sut/abort!)
                    (sut/retry!))))))
       (is (= 2 @executed)))
+
+    (reset! executed 0)
+
+    (testing "sets abort! cause"
+      (is
+        (aborted? #(= (get-cause-message %) "boom")
+          (sut/with-retries* (sut/retries 3)
+            #(sut/abort! (Exception. "boom")))))
+      (is (= 0 @executed)))
 
     (reset! executed 0)
 

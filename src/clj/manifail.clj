@@ -2,7 +2,6 @@
   (:refer-clojure :exclude (delay))
   (:require [manifold
              [deferred :as d]
-             [stream :as s]
              [executor :as ex]])
   (:import [clojure.lang ExceptionInfo]
            [manifail Aborted RetriesExceeded]))
@@ -111,21 +110,30 @@
             aborted (stopped from being retried)"}
   abort ::abort)
 
-(defn abort!
-  "Throws an exception which short-circuits the execution.
+(defn- check-throwable [x]
+  (assert (instance? Throwable x)
+          (str "Cause must be Throwable, got: " x "!")))
 
-  Should only be used inside the retryable code. No more retries will be
-  performed after an abort."
-  ([] (abort! "Aborted"))
-  ([msg] (throw (Aborted. msg))))
+(let [e (Aborted.)]
+  (defn abort!
+    "Throws an exception which short-circuits the execution.
+
+    Should only be used inside the retryable code. No more retries will be
+    performed after an abort."
+    ([] (throw e))
+    ([cause]
+     (check-throwable cause)
+     (throw (Aborted. cause)))))
 
 (let [e (ex-info "Retry" {::type retry})]
   (defn retry!
     "Short-circuits the execution for the next retry.
 
     Should only be used inside the retryable code."
-    []
-    (throw e)))
+    ([] (throw e))
+    ([cause]
+     (check-throwable cause)
+     (throw (ex-info "Retry" {::type retry} cause)))))
 
 (def ^:private current-thread-executor
   (reify java.util.concurrent.Executor
@@ -159,18 +167,25 @@
           (d/catch' identity)
           (d/chain'
             (fn [result]
-              (cond (abort? result) (abort!)
-                    (instance? Aborted result) (throw result)
+              (let [throwable? (instance? Throwable result)
+                    retry-ex? (and (instance? ExceptionInfo result)
+                                   (retry? (-> result ex-data ::type)))]
+                (cond (abort? result) (abort!)
+                      (instance? Aborted result) (throw result)
 
-                    (or (instance? Throwable result) (retry? result))
-                    (-> (let [d (first delays')]
-                          (when (or (nil? d) (< d 0))
-                            (throw (RetriesExceeded. retried)))
-                          (-> (d/deferred ex)
-                              (d/timeout! d ::run)))
-                        (d/chain' (fn [_] (d/recur (inc retried) (rest delays')))))
+                      (or throwable? (retry? result))
+                      (-> (let [d (first delays')]
+                            (when (or (nil? d) (< d 0))
+                              (throw (RetriesExceeded. retried
+                                       (when throwable?
+                                         (if retry-ex?
+                                           (.getCause ^Throwable result)
+                                           result)))))
+                            (-> (d/deferred ex)
+                                (d/timeout! d ::run)))
+                          (d/chain' (fn [_] (d/recur (inc retried) (rest delays')))))
 
-                    :else result)))))))
+                      :else result))))))))
 
 (defmacro with-retries
   "Macro wrapper over `with-retries*`.
