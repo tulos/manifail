@@ -19,7 +19,7 @@ or through Diehard.
 
 ## Usage
 
-`[tulos/manifail "0.1.0"]`
+`[tulos/manifail "0.2.0"]`
 
 First, require the namespaces:
 
@@ -29,6 +29,51 @@ First, require the namespaces:
 (require '[manifold.executor :as ex])
 (use 'manifail)
 ```
+
+### Retry building blocks
+
+To create a retriable execution with Manifail you have to use four parts
+working in concert:
+
+1. A retry policy - sequence of milliseconds representing the delay of retries
+2. A piece of code potentially having the `retry`/`abort` markers
+3. An executor to run the code and retry attempts on
+4. `with-retry` macro or `with-retry*` function wrapping the code to be retried
+
+It looks like this:
+
+```clojure
+(def unreliable-service-executor (Executors/newFixedThreadPool 1))
+
+(ex/with-executor unreliable-service-executor
+  (with-retries [10 50 100]
+    (try (let [result (unreliable-service)]
+           (when (:error result)
+             (retry! (ex-info "Error result!" {:result result})))
+           result)
+         (catch UnrecoverableException e
+           (abort! e)))))
+```
+
+The `with-retries` block above will return a deferred of its result. This
+deferred will get fulfilled when either the original call or one of the three
+retries completes. The execution will happen on the specified
+`unreliable-service-executor`.
+
+Given the above code, a retry will happen if:
+
+* An exception is thrown which is not an `UnrecoverableException`
+* The `result` has an `:error` key
+
+and the resulting deferred will be completed when:
+
+* A non `:error` response is returned
+* An `UnrecoverableException` happens and the execution is aborted. In this
+  case a `manifail.Aborted` exception is thrown with the cause set to `e`.
+* A `manifail.RetriesExceeded` exception is thrown when there are no more retry
+  attempts
+
+### Retry policies
 
 The simplest possible retry logic that will perform 3 retries with delays of
 50, 100 and 150 ms:
@@ -82,7 +127,7 @@ unlimited equally spaced out retries with duration limited to 500 ms:
   (unreliable-service))
 ```
 
-### A Complete Example
+### A complete example
 
 Below I tried to map callbacks available in Failsafe retry policy to the code
 that you could write in order to get equivalent behaviour.  We assume that
