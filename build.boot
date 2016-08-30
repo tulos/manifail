@@ -18,7 +18,7 @@
                     "http://www.eclipse.org/legal/epl-v10.html"}})
 
 (require '[adzerk.bootlaces :as l :refer [push-release]]
-         '[adzerk.boot-test :refer [test]])
+         '[adzerk.boot-test :as t])
 (l/bootlaces! version :dont-modify-paths? true)
 
 (deftask build-jar []
@@ -26,3 +26,6 @@
 
 (deftask release []
   (comp (build-jar) (push-release)))
+
+(deftask test []
+  (comp (javac) (t/test)))
