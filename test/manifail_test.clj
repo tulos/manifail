@@ -189,3 +189,17 @@
                  (Thread/sleep 30)
                  (sut/retry!)))))
       (is (= 2 @executed)))))
+
+(deftest with-retries-reset
+  (let [executed (atom 0)]
+
+    (testing "resets"
+      (is
+        (retries-exceeded?
+          (sut/with-retries* (sut/retries 2)
+            #(do (swap! executed inc)
+                 (if (= @executed 3)
+                   (sut/reset! (sut/retries 1))
+                   (sut/retry!))))))
+      ;; (1 execution + 2 retries initially) + (1 execution + 1 retry after reset)
+      (is (= 5 @executed)))))

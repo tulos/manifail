@@ -1,5 +1,5 @@
 (ns manifail
-  (:refer-clojure :exclude (delay))
+  (:refer-clojure :exclude [delay reset!])
   (:require [manifold
              [deferred :as d]
              [executor :as ex]])
@@ -135,6 +135,12 @@
      (check-throwable cause)
      (throw (ex-info "Retry" {::type retry} cause)))))
 
+(defn reset!
+  "Short-circuits the execution and restarts the retry cycle with the new seq
+  of `delays`."
+  [delays]
+  (throw (ex-info "Reset" {::type ::reset, ::delays delays})))
+
 (def ^:private current-thread-executor
   (reify java.util.concurrent.Executor
     (execute [_ r]
@@ -158,19 +164,23 @@
       (with-retries* (retries 5)
         call-service))"
   [delays f]
-  (let [first? #(identical? % ::first)
-        abort? #(identical? % abort)
+  (let [abort? #(identical? % abort)
         retry? #(identical? % retry)
+        reset? #(identical? % ::reset)
+        ex? #(and (instance? ExceptionInfo %2)
+                  (%1 (-> %2 ex-data ::type)))
+        retry-ex? #(ex? retry? %)
+        reset-ex? #(ex? reset? %)
+        reset-delays #(-> % ex-data ::delays)
         ex (or (ex/executor) current-thread-executor)]
     (d/loop [retried 0, delays' delays]
       (-> (d/future-with ex (f))
           (d/catch' identity)
           (d/chain'
             (fn [result]
-              (let [throwable? (instance? Throwable result)
-                    retry-ex? (and (instance? ExceptionInfo result)
-                                   (retry? (-> result ex-data ::type)))]
-                (cond (abort? result) (abort!)
+              (let [throwable? (instance? Throwable result)]
+                (cond (reset-ex? result) (d/recur 0 (reset-delays result))
+                      (abort? result) (abort!)
                       (instance? Aborted result) (throw result)
 
                       (or throwable? (retry? result))
@@ -178,7 +188,7 @@
                             (when (or (nil? d) (< d 0))
                               (throw (RetriesExceeded. retried
                                        (when throwable?
-                                         (if retry-ex?
+                                         (if (retry-ex? result)
                                            (.getCause ^Throwable result)
                                            result)))))
                             (-> (d/deferred ex)

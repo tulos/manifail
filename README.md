@@ -36,7 +36,7 @@ To create a retriable execution with Manifail you have to use four parts
 working in concert:
 
 1. A retry policy - sequence of milliseconds representing the delay of retries
-2. A piece of code potentially having the `retry`/`abort` markers
+2. A piece of code potentially having the `retry`/`abort`/`reset` markers
 3. An executor to run the code and retry attempts on
 4. `with-retry` macro or `with-retry*` function wrapping the code to be retried
 
@@ -46,13 +46,17 @@ It looks like this:
 (def unreliable-service-executor (Executors/newFixedThreadPool 1))
 
 (ex/with-executor unreliable-service-executor
-  (with-retries [10 50 100]
-    (try (let [result (unreliable-service)]
-           (when (:error result)
-             (retry! (ex-info "Error result!" {:result result})))
-           result)
-         (catch UnrecoverableException e
-           (abort! e)))))
+  (let [retry-delays [10 50 100]]
+    (with-retries retry-delays
+      (try (let [result (unreliable-service)]
+             (when (:error result)
+               (retry! (ex-info "Error result!" {:result result})))
+             result)
+           (catch UnrecoverableException e
+             (abort! e))
+           (catch SessionExpiredException e
+             (authenticate!)
+             (reset! retry-delays)))
 ```
 
 The `with-retries` block above will return a deferred of its result. This
@@ -69,9 +73,13 @@ and the resulting deferred will be completed when:
 
 * A non `:error` response is returned
 * An `UnrecoverableException` happens and the execution is aborted. In this
-  case a `manifail.Aborted` exception is thrown with the cause set to `e`.
+  case a `manifail.Aborted` exception is thrown with the cause set to `e`
 * A `manifail.RetriesExceeded` exception is thrown when there are no more retry
-  attempts
+  attempts.
+
+In case a `SessionExpiredException` is thrown the whole execution cycle will
+begin anew with the supplied sequence of `retry-delays`. In the example above
+it's the same sequence as the one provided to `with-retries` originally.
 
 ### Retry policies
 
@@ -146,6 +154,9 @@ that you could write in order to get equivalent behaviour.  We assume that
              (retry!))
            result)
          (catch OkException _ :ok) ;; do not retry on this exception
+         (catch RecoverableException _
+           (do-some-recovery)
+           (reset! (delay (retries 5) 50))) ;; reset the execution anew
          (catch Throwable e
            (println "-- on failed attempt any")
            (throw e))))
