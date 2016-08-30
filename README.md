@@ -1,5 +1,7 @@
 # manifail
 
+[![Build Status](https://travis-ci.org/tulos/manifail.png?branch=master)](https://travis-ci.org/tulos/manifail)
+
 Handle failures and manage retries without callbacks!
 
 The semantics are modeled closely to
