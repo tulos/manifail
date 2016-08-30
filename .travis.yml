@@ -1,10 +1,10 @@
 sudo: false
 language: java
-script: boot javac test
+script: boot test
 install:
   - mkdir -p ~/bin
   - export PATH=~/bin:$PATH
-  - curl -L https://github.com/boot-clj/boot-bin/releases/download/2.6.0/boot.sh -o ~/bin/boot
+  - curl -fsSLo ~/bin/boot https://github.com/boot-clj/boot-bin/releases/download/latest/boot.sh
   - chmod +x ~/bin/boot
 env:
   matrix:
