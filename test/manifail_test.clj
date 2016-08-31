@@ -211,7 +211,7 @@
 
 (deftest dynamic-vars
   (let [states (atom [])
-        eps-ms 3, execution-ms 10, delay-ms 20]
+        eps-ms 15, execution-ms 50, delay-ms 100]
     (is
       (retries-exceeded?
         (sut/with-retries* (repeat 2 delay-ms)
