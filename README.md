@@ -137,6 +137,14 @@ unlimited equally spaced out retries with duration limited to 500 ms:
   (unreliable-service))
 ```
 
+### Retry context
+
+There are several dynamic bindings available in the retry block:
+
+* `*retry-count*` - the current retry count
+* `*elapsed-ms*` - milliseconds elapsed since entering the retry block
+* `*last-result*` - last result/exception that caused the retry
+
 ### A complete example
 
 Below I tried to map callbacks available in Failsafe retry policy to the code
@@ -146,21 +154,27 @@ that you could write in order to get equivalent behaviour.  We assume that
 ```clojure
 (->
   (with-retries (delay (retries 5) 50) ;; retry on any exception by default
+    (println "-- on before execution")
+    (when (> *retry-count* 0)
+      (println "-- on before retry"))
     (try (let [result (call-some-service)]
            (when (> result 5) ;; abort condition
              (println "-- on failed attempt 1")
              (println "-- on before abort")
-             (abort! result))
+             (abort! result)) ;; set the value of Abort to `result`
            (when (= result ::bad) ;; retry condition
              (println "-- on failed attempt 2")
              (retry!))
            result)
          (catch OkException _ :ok) ;; do not retry on this exception
+         (catch UnrecoverableException e
+           (abort! e)) ;; set the cause of Abort to `e`
          (catch RecoverableException _
            (do-some-recovery)
-           (reset! (delay (retries 5) 50))) ;; reset the execution anew
+           (reset! (delay (retries 5) 50)))
          (catch Throwable e
-           (println "-- on failed attempt any")
+           (when-not (marker? e)
+             (println "-- on failed attempt any"))
            (throw e))))
   (d/chain #(println "-- on complete" %))
   (d/catch manifail.Aborted #(println "-- on after abort" (unwrap %))
