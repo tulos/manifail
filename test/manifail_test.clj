@@ -169,6 +169,15 @@
 
     (reset! executed 0)
 
+    (testing "sets abort! value"
+      (is
+        (aborted? #(= (.value %) "boom")
+          (sut/with-retries* (sut/retries 3)
+            #(sut/abort! "boom"))))
+      (is (= 0 @executed)))
+
+    (reset! executed 0)
+
     (testing "limits duration"
       (is
         (retries-exceeded?
@@ -202,3 +211,31 @@
                    (sut/retry!))))))
       ;; (1 execution + 2 retries initially) + (1 execution + 1 retry after reset)
       (is (= 5 @executed)))))
+
+(deftest dynamic-vars
+  (let [states (atom [])
+        eps-ms 3, execution-ms 10, delay-ms 20]
+    (is
+      (retries-exceeded?
+        (sut/with-retries* (repeat 2 delay-ms)
+          #(do (swap! states conj {:elapsed sut/*elapsed-ms*
+                                   :last-result sut/*last-result*
+                                   :retrying sut/*retry-count*})
+               (Thread/sleep execution-ms)
+               (sut/retry! (count @states))))))
+
+    (is (= 3 (count @states)))
+    (let [{:keys [elapsed last-result retrying]} (first @states)]
+      (is (<= elapsed eps-ms))
+      (is (= retrying 0))
+      (is (= last-result ::sut/none)))
+
+    (let [{:keys [elapsed last-result retrying]} (second @states)]
+      (is (<= elapsed (+ execution-ms delay-ms eps-ms)))
+      (is (= retrying 1))
+      (is (= last-result 1)))
+
+    (let [{:keys [elapsed last-result retrying]} (nth @states 2)]
+      (is (<= elapsed (+ (* 2 (+ execution-ms delay-ms eps-ms)))))
+      (is (= retrying 2))
+      (is (= last-result 2)))))

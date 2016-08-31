@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+## 0.4.0 - 2016-08-31
+### Added
+- `*last-result*/*retry-count*/*elapsed-ms*` dynamic variables available inside
+  the retry block
+### Changed
+- `retry!/abort!` accept an object as an argument in addition to a `Throwable` cause
+- `retry!/abort!` markers produce `Throwable` exceptions instead of `ExceptionInfo`
+- All special exceptions subclass `Throwable` instead of `RuntimeException`
+
 ## 0.3.0 - 2016-08-30
 ### Added
 - `reset!` to reset the execution with a new delays sequence
@@ -12,6 +21,7 @@
 
 ## 0.1.0 - 2016-08-15
 ### Added
-- Initial release: `with-retries`, `forever`, `retries`, `delay`, `limit-duration`, `limit-retries`
+- Initial release: `with-retries`, `forever`, `retries`, `delay`,
+  `limit-duration`, `limit-retries`
 
-[Unreleased]: https://github.com/your-name/manifail/compare/0.3.0...HEAD
+[Unreleased]: https://github.com/your-name/manifail/compare/0.4.0...HEAD

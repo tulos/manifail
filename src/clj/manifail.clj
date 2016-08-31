@@ -110,10 +110,6 @@
             aborted (stopped from being retried)"}
   abort ::abort)
 
-(defn- check-throwable [x]
-  (assert (instance? Throwable x)
-          (str "Cause must be Throwable, got: " x "!")))
-
 (let [e (Aborted.)]
   (defn abort!
     "Throws an exception which short-circuits the execution.
@@ -121,9 +117,10 @@
     Should only be used inside the retriable code. No more retries will be
     performed after an abort."
     ([] (throw e))
-    ([cause]
-     (check-throwable cause)
-     (throw (Aborted. cause)))))
+    ([v]
+     (throw (if (instance? Throwable v)
+              (Aborted. ^Throwable v)
+              (Aborted. ^Object v))))))
 
 (let [e (Retried.)]
   (defn retry!
@@ -131,9 +128,10 @@
 
     Should only be used inside the retriable code."
     ([] (throw e))
-    ([cause]
-     (check-throwable cause)
-     (throw (Retried. cause)))))
+    ([v]
+     (throw (if (instance? Throwable v)
+              (Retried. ^Throwable v)
+              (Retried. ^Object v))))))
 
 (defn reset!
   "Short-circuits the execution and restarts the retry cycle with the new seq
@@ -163,10 +161,31 @@
       (instance? Retried v)
       (instance? RetriesExceeded v)))
 
+(defn- unwrap-marker [v]
+  (cond (instance? Aborted v) (or (.value ^Aborted v) (.getCause ^Throwable v))
+        (instance? Retried v) (or (.value ^Retried v) (.getCause ^Throwable v))
+        :else v))
+
 (def ^:private current-thread-executor
   (reify java.util.concurrent.Executor
     (execute [_ r]
       (r))))
+
+(def ^{:dynamic true
+       :doc "The result/exception which happened during the last
+ execution. `:manifail/none` during the first execution of if the
+ execution was reset."}
+  *last-result* nil)
+
+(def ^{:dynamic true
+       :doc "The retry count of the current execution.
+Zero during the first one or after a reset."}
+  *retry-count* nil)
+
+(def ^{:dynamic true
+       :doc "The number of milliseconds spent on executions and retries up to
+the current execution."}
+  *elapsed-ms* nil)
 
 (defn with-retries*
   "Executes the given function `f` at least once and then as long as retry
@@ -182,37 +201,46 @@
   If you want to specify an executor which should be used to run `f`, use
   `manifold.executor/with-executor`, e.g.:
 
-    (manifold.executor/with-executor my-executor
-      (with-retries* (retries 5)
-        call-service))"
+  ```
+  (manifold.executor/with-executor my-executor
+    (with-retries* (retries 5)
+      call-service))
+  ```"
   [delays f]
-  (let [abort? #(identical? % abort)
-        retry? #(identical? % retry)
-        reset-delays (fn [^Reset r] (.retryDelays r))
-        ex (or (ex/executor) current-thread-executor)]
-    (d/loop [retried 0, delays' delays]
-      (-> (d/future-with ex (f))
+  (let [reset-delays (fn [^Reset r] (.retryDelays r))
+        cause (fn [^Throwable t] (.getCause t))
+        ex (or (ex/executor) current-thread-executor)
+        elapsed (volatile! 0)
+        started (System/nanoTime)]
+    (d/loop [retried 0, last-result ::none, delays' delays]
+      (-> (d/future-with ex
+            (vreset! elapsed (- (System/nanoTime) started))
+            (binding [*last-result* last-result
+                      *retry-count* retried
+                      *elapsed-ms* (/ @elapsed 1e6)]
+              (f)))
           (d/catch' identity)
           (d/chain'
             (fn [result]
-              (let [throwable? (instance? Throwable result)]
-                (cond (instance? Reset result) (d/recur 0 (reset-delays result))
-                      (instance? Aborted result) (throw result)
-                      (abort? result) (abort!)
+              (cond (instance? Reset result) (d/recur 0 ::none (reset-delays result))
+                    (instance? Aborted result) (throw result)
+                    (identical? result abort) (abort!)
 
-                      (or throwable? (retry? result))
-                      (-> (let [d (first delays')]
-                            (when (or (nil? d) (< d 0))
-                              (throw (RetriesExceeded. retried
-                                       (when throwable?
-                                         (if (instance? Retried result)
-                                           (.getCause ^Throwable result)
-                                           result)))))
-                            (-> (d/deferred ex)
-                                (d/timeout! d ::run)))
-                          (d/chain' (fn [_] (d/recur (inc retried) (rest delays')))))
-
-                      :else result))))))))
+                    (or (instance? Throwable result)
+                        (identical? result retry))
+                    (-> (let [d (first delays')]
+                          (when (or (nil? d) (< d 0))
+                            (throw (RetriesExceeded. retried
+                                     (when (instance? Throwable result)
+                                       (if (instance? Retried result)
+                                         (cause result)
+                                         result)))))
+                          (-> (d/deferred ex)
+                              (d/timeout! d ::run)))
+                        (d/chain' (fn [_] (d/recur (inc retried)
+                                                   (unwrap-marker result)
+                                                   (rest delays')))))
+                    :else result)))))))
 
 (defmacro with-retries
   "Macro wrapper over `with-retries*`.
