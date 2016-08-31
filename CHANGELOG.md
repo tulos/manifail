@@ -6,6 +6,7 @@
 ### Added
 - `*last-result*/*retry-count*/*elapsed-ms*` dynamic variables available inside
   the retry block
+- `unwrap` to get the value/cause of the marker
 ### Changed
 - `retry!/abort!` accept an object as an argument in addition to a `Throwable` cause
 - `retry!/abort!` markers produce `Throwable` exceptions instead of `ExceptionInfo`

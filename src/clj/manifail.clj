@@ -166,6 +166,20 @@
         (instance? Retried v) (or (.value ^Retried v) (.getCause ^Throwable v))
         :else v))
 
+(defn- retries-exceeded [retried result]
+  (let [result' (unwrap-marker result)]
+    (if (instance? Throwable result')
+      (doto (RetriesExceeded. retried)
+        (.initCause result'))
+      (RetriesExceeded. retried result'))))
+
+(defn unwrap
+  "Unwraps a `RetriesExceeded`/`Aborted`/`Retried`"
+  [v]
+  (cond (instance? RetriesExceeded v)
+        (or (.value ^RetriesExceeded v) (.getCause ^Throwable v))
+        :else (unwrap-marker v)))
+
 (def ^:private current-thread-executor
   (reify java.util.concurrent.Executor
     (execute [_ r]
@@ -208,7 +222,6 @@ the current execution."}
   ```"
   [delays f]
   (let [reset-delays (fn [^Reset r] (.retryDelays r))
-        cause (fn [^Throwable t] (.getCause t))
         ex (or (ex/executor) current-thread-executor)
         elapsed (volatile! 0)
         started (System/nanoTime)]
@@ -230,11 +243,7 @@ the current execution."}
                         (identical? result retry))
                     (-> (let [d (first delays')]
                           (when (or (nil? d) (< d 0))
-                            (throw (RetriesExceeded. retried
-                                     (when (instance? Throwable result)
-                                       (if (instance? Retried result)
-                                         (cause result)
-                                         result)))))
+                            (throw (retries-exceeded retried result)))
                           (-> (d/deferred ex)
                               (d/timeout! d ::run)))
                         (d/chain' (fn [_] (d/recur (inc retried)

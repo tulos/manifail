@@ -81,9 +81,6 @@
         false
         (catch manifail.RetriesExceeded e (ex-pred e)))))
 
-(defn- get-cause-message [e]
-  (-> e (.getCause) (.getMessage)))
-
 (deftest with-retries
   (let [executed (atom 0)]
 
@@ -98,7 +95,7 @@
 
     (testing "executes several times, retries using value"
       (is
-        (retries-exceeded?
+        (retries-exceeded? #(= (sut/unwrap %) sut/retry)
           (sut/with-retries* (sut/retries 2)
             #(do (swap! executed inc)
                  sut/retry))))
@@ -108,7 +105,7 @@
 
     (testing "executes several times, retries using retry!"
       (is
-        (retries-exceeded?
+        (retries-exceeded? #(nil? (sut/unwrap %))
           (sut/with-retries* (sut/retries 2)
             #(do (swap! executed inc)
                  (sut/retry!)))))
@@ -118,7 +115,7 @@
 
     (testing "retries exceeded carries cause"
       (is
-        (retries-exceeded? #(= (get-cause-message %) "boom3")
+        (retries-exceeded? #(= (.getMessage (sut/unwrap %)) "boom3")
           (sut/with-retries* (sut/retries 2)
             #(do (swap! executed inc)
                  (sut/retry! (Exception. (str "boom" @executed)))))))
@@ -128,7 +125,7 @@
 
     (testing "executes several times, retries using generic exception"
       (is
-        (retries-exceeded? #(= (get-cause-message %) "boom")
+        (retries-exceeded? #(= (.getMessage (sut/unwrap %)) "boom")
           (sut/with-retries* (sut/retries 2)
             #(do (swap! executed inc)
                  (throw (Exception. "boom"))))))
@@ -148,7 +145,7 @@
 
     (reset! executed 0)
 
-    (testing "aborts execution using exception"
+    (testing "aborts execution after some time"
       (is
         (aborted?
           (sut/with-retries* (sut/retries 3)
@@ -162,7 +159,7 @@
 
     (testing "sets abort! cause"
       (is
-        (aborted? #(= (get-cause-message %) "boom")
+        (aborted? #(= (.getMessage (sut/unwrap %)) "boom")
           (sut/with-retries* (sut/retries 3)
             #(sut/abort! (Exception. "boom")))))
       (is (= 0 @executed)))
@@ -171,7 +168,7 @@
 
     (testing "sets abort! value"
       (is
-        (aborted? #(= (.value %) "boom")
+        (aborted? #(= (sut/unwrap %) "boom")
           (sut/with-retries* (sut/retries 3)
             #(sut/abort! "boom"))))
       (is (= 0 @executed)))
@@ -203,12 +200,12 @@
 
     (testing "resets"
       (is
-        (retries-exceeded?
+        (retries-exceeded? #(= (sut/unwrap %) 5)
           (sut/with-retries* (sut/retries 2)
             #(do (swap! executed inc)
                  (if (= @executed 3)
                    (sut/reset! (sut/retries 1))
-                   (sut/retry!))))))
+                   (sut/retry! @executed))))))
       ;; (1 execution + 2 retries initially) + (1 execution + 1 retry after reset)
       (is (= 5 @executed)))))
 

@@ -52,7 +52,7 @@ It looks like this:
     (with-retries retry-delays
       (try (let [result (unreliable-service)]
              (when (:error result)
-               (retry! (ex-info "Error result!" {:result result})))
+               (retry! result)))
              result)
            (catch UnrecoverableException e
              (abort! e))
@@ -150,7 +150,7 @@ that you could write in order to get equivalent behaviour.  We assume that
            (when (> result 5) ;; abort condition
              (println "-- on failed attempt 1")
              (println "-- on before abort")
-             (abort! (ex-info "Result > 5!" {:result result})))
+             (abort! result))
            (when (= result ::bad) ;; retry condition
              (println "-- on failed attempt 2")
              (retry!))
@@ -163,8 +163,8 @@ that you could write in order to get equivalent behaviour.  We assume that
            (println "-- on failed attempt any")
            (throw e))))
   (d/chain #(println "-- on complete" %))
-  (d/catch manifail.Aborted #(println "-- on after abort" %))
-  (d/catch manifail.RetriesExceeded #(println "-- on retries exceeded" %))
+  (d/catch manifail.Aborted #(println "-- on after abort" (unwrap %))
+  (d/catch manifail.RetriesExceeded #(println "-- on retries exceeded" (unwrap %))
   (d/catch #(println "-- on failure" %)))
 ```
 
