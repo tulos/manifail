@@ -4,7 +4,7 @@
              [deferred :as d]
              [executor :as ex]])
   (:import [clojure.lang ExceptionInfo]
-           [manifail Aborted RetriesExceeded]))
+           [manifail Aborted Retried RetriesExceeded Reset]))
 
 (defn forever
   "A sequence of infinite retries with zero delay."
@@ -118,28 +118,50 @@
   (defn abort!
     "Throws an exception which short-circuits the execution.
 
-    Should only be used inside the retryable code. No more retries will be
+    Should only be used inside the retriable code. No more retries will be
     performed after an abort."
     ([] (throw e))
     ([cause]
      (check-throwable cause)
      (throw (Aborted. cause)))))
 
-(let [e (ex-info "Retry" {::type retry})]
+(let [e (Retried.)]
   (defn retry!
     "Short-circuits the execution for the next retry.
 
-    Should only be used inside the retryable code."
+    Should only be used inside the retriable code."
     ([] (throw e))
     ([cause]
      (check-throwable cause)
-     (throw (ex-info "Retry" {::type retry} cause)))))
+     (throw (Retried. cause)))))
 
 (defn reset!
   "Short-circuits the execution and restarts the retry cycle with the new seq
   of `delays`."
   [delays]
-  (throw (ex-info "Reset" {::type ::reset, ::delays delays})))
+  (throw (Reset. delays)))
+
+(defn marker?
+  "True if the value `v` is an abort/retry/reset marker.
+
+  Useful in case you are catching an `Exception/ExceptionInfo/RuntimeException/Throwable/Error`
+  in the retriable block and want to make sure you only act on a non-marker value, e.g.:
+
+  ```
+  (with-retries ...
+    ...
+    (catch Throwable t
+      (when-not (marker? t)
+        (do-something-on-failure)
+      (throw t))))
+  ```"
+  [v]
+  (or (identical? v abort)
+      (identical? v retry)
+      (instance? Reset v)
+      (instance? Aborted v)
+      (instance? Retried v)
+      (instance? RetriesExceeded v)))
 
 (def ^:private current-thread-executor
   (reify java.util.concurrent.Executor
@@ -166,12 +188,7 @@
   [delays f]
   (let [abort? #(identical? % abort)
         retry? #(identical? % retry)
-        reset? #(identical? % ::reset)
-        ex? #(and (instance? ExceptionInfo %2)
-                  (%1 (-> %2 ex-data ::type)))
-        retry-ex? #(ex? retry? %)
-        reset-ex? #(ex? reset? %)
-        reset-delays #(-> % ex-data ::delays)
+        reset-delays (fn [^Reset r] (.retryDelays r))
         ex (or (ex/executor) current-thread-executor)]
     (d/loop [retried 0, delays' delays]
       (-> (d/future-with ex (f))
@@ -179,16 +196,16 @@
           (d/chain'
             (fn [result]
               (let [throwable? (instance? Throwable result)]
-                (cond (reset-ex? result) (d/recur 0 (reset-delays result))
-                      (abort? result) (abort!)
+                (cond (instance? Reset result) (d/recur 0 (reset-delays result))
                       (instance? Aborted result) (throw result)
+                      (abort? result) (abort!)
 
                       (or throwable? (retry? result))
                       (-> (let [d (first delays')]
                             (when (or (nil? d) (< d 0))
                               (throw (RetriesExceeded. retried
                                        (when throwable?
-                                         (if (retry-ex? result)
+                                         (if (instance? Retried result)
                                            (.getCause ^Throwable result)
                                            result)))))
                             (-> (d/deferred ex)

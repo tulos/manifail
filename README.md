@@ -21,7 +21,7 @@ or through Diehard.
 
 ## Usage
 
-`[tulos/manifail "0.3.0"]`
+`[tulos/manifail "0.4.0"]`
 
 First, require the namespaces:
 

@@ -5,8 +5,7 @@
              [stream :as s]
              [executor :as ex]]
             [manifail :as sut])
-  (:import [clojure.lang ExceptionInfo]
-           [java.util.concurrent Executors]))
+  (:import [java.util.concurrent Executors]))
 
 (defn- ->seq [s] (vec s))
 

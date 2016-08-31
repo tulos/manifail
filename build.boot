@@ -1,5 +1,5 @@
 (def project 'tulos/manifail)
-(def version "0.3.0")
+(def version "0.4.0")
 
 (set-env! :resource-paths #{"src/clj"}
           :source-paths   #{"test" "src/java"}
@@ -29,3 +29,5 @@
 
 (deftask test []
   (comp (javac) (t/test)))
+
+(set! *warn-on-reflection* true)
