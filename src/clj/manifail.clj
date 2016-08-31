@@ -142,8 +142,8 @@
 (defn marker?
   "True if the value `v` is an abort/retry/reset marker.
 
-  Useful in case you are catching an `Exception/ExceptionInfo/RuntimeException/Throwable/Error`
-  in the retriable block and want to make sure you only act on a non-marker value, e.g.:
+  Useful in case you are catching an `Throwable/Error` in the retriable code
+  block and want to make sure you only act on a non-marker value, e.g.:
 
   ```
   (with-retries ...
@@ -174,7 +174,7 @@
       (RetriesExceeded. retried result'))))
 
 (defn unwrap
-  "Unwraps a `RetriesExceeded`/`Aborted`/`Retried`"
+  "Unwraps a value/cause of a `RetriesExceeded`/`Aborted`/`Retried`."
   [v]
   (cond (instance? RetriesExceeded v)
         (or (.value ^RetriesExceeded v) (.getCause ^Throwable v))
@@ -223,14 +223,12 @@ the current execution."}
   [delays f]
   (let [reset-delays (fn [^Reset r] (.retryDelays r))
         ex (or (ex/executor) current-thread-executor)
-        elapsed (volatile! 0)
         started (System/nanoTime)]
     (d/loop [retried 0, last-result ::none, delays' delays]
       (-> (d/future-with ex
-            (vreset! elapsed (- (System/nanoTime) started))
             (binding [*last-result* last-result
                       *retry-count* retried
-                      *elapsed-ms* (/ @elapsed 1e6)]
+                      *elapsed-ms* (/ (- (System/nanoTime) started) 1e6)]
               (f)))
           (d/catch' identity)
           (d/chain'
